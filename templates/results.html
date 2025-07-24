@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Results</title>
+</head>
+<body>
+    <h2>Detected Text:</h2>
+    <ul>
+        {% for item in results %}
+            <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+    <h2>Processed Image:</h2>
+    <img src="data:image/jpeg;base64,{{ image_data }}" style="max-width: 100%;">
+    <br><a href="/">Upload Another</a>
+</body>
+</html>

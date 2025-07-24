@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>YOLO + OCR Upload</title>
+</head>
+<body>
+    <h2>Upload Image and YOLO Model</h2>
+    <form id="upload-form" action="http://localhost:8000/upload" method="post" enctype="multipart/form-data">
+        <label>Select Image:</label><br>
+        <input type="file" name="image" accept="image/*" required><br><br>
+
+        <label>Select YOLOv8 Model (.pt):</label><br>
+        <input type="file" name="model" accept=".pt" required><br><br>
+
+        <input type="submit" value="Upload and Process">
+    </form>
+</body>
+</html>

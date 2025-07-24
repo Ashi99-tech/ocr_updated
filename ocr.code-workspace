@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../Concrete pole ocr/My First Project.v2i.yolov11/runs/detect/yolov8m_custom3/weights"
+		}
+	],
+	"settings": {}
+}
