@@ -1,97 +1,69 @@
-import os
-import shutil
-import base64
-import numpy as np
-from io import BytesIO
-
-import cv2
-import easyocr
-from fastapi import FastAPI, UploadFile, File, Request, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
+from flask import Flask, request, jsonify, render_template
+import google.generativeai as genai
+from PIL import Image
+import io
+import json
 from ultralytics import YOLO
+import numpy as np
 
-# --- App setup ---
-app = FastAPI()
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+app = Flask(__name__)
 
-templates = Jinja2Templates(directory="templates")
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+# ✅ Configure Gemini 2.0 Flash
+genai.configure(api_key="................")
+model = genai.GenerativeModel("gemini-2.0-flash")
 
-# --- Load ML Models ---
-yolo_model = YOLO("C:/works/ocr_updated/best.pt")  # Change to your model path
-ocr_reader = easyocr.Reader(['en'], gpu=False)
+# ✅ Load YOLOv8 model
+yolo_model = YOLO("C:/Users/ASUS TUF/Downloads/ocr_cropped/ocr_cropped/best.pt")
 
-# --- Routes ---
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    """Displays the upload page."""
-    return templates.TemplateResponse("index.html", {"request": request})
+@app.route('/upload', methods=['POST'])
+def upload_image():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
 
+    image_file = request.files['image']
+    image = Image.open(image_file).convert("RGB")
 
-@app.post("/upload/", response_class=HTMLResponse)
-async def upload(request: Request, file: UploadFile = File(...)):
-    """Handles image upload, YOLO detection, OCR reading, and displays results."""
+    # Detect text regions using YOLO
+    results = yolo_model.predict(image, conf=0.4)
+    boxes = results[0].boxes.xyxy.cpu().numpy().astype(int)
+
+    if len(boxes) == 0:
+        return jsonify({"error": "No text area detected"}), 404
+
+    # Crop the first detected region
+    x1, y1, x2, y2 = boxes[0]
+    cropped = image.crop((x1, y1, x2, y2))
+
+    # Convert to bytes
+    img_bytes = io.BytesIO()
+    cropped.save(img_bytes, format="PNG")
+    img_bytes = img_bytes.getvalue()
+
+    # Gemini prompt
+    prompt = """Extract all visible text (letters and numbers only) from this image and return it as a JSON like:
+    {
+      "detected_text": ["..."]
+    }"""
+
     try:
-        # Validate file format
-        if not file.filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
-            raise HTTPException(status_code=400, detail="Unsupported file format")
+        response = model.generate_content(
+            [prompt, Image.open(io.BytesIO(img_bytes))],
+            generation_config={"response_mime_type": "application/json"}
+        )
 
-        # Save uploaded file
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        try:
+            result_json = json.loads(response.text)
+        except json.JSONDecodeError:
+            result_json = {"detected_text": [response.text.strip()]}
 
-        # Load image
-        image = cv2.imread(file_path)
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        # YOLO object detection
-        results = yolo_model(image_rgb)
-        ocr_results_combined = []
-
-        for result in results:
-            boxes = result.boxes.xyxy.cpu().numpy()  # Bounding boxes: x1, y1, x2, y2
-
-            for box in boxes:
-                x1, y1, x2, y2 = map(int, box)
-                cropped_img = image[y1:y2, x1:x2]
-
-                # --- Preprocessing for OCR ---
-                preprocessed_img = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2RGB)
-
-                # Resize small images
-                h, w = preprocessed_img.shape[:2]
-                if h < 30 or w < 30:
-                    preprocessed_img = cv2.resize(preprocessed_img, (max(100, w * 2), max(30, h * 2)))
-
-                # Optional denoising
-                preprocessed_img = cv2.fastNlMeansDenoisingColored(preprocessed_img, None, 10, 10, 7, 21)
-
-                # OCR
-                ocr_output = ocr_reader.readtext(preprocessed_img)
-
-                # Debug print
-                print("OCR Output:", ocr_output)
-
-                for _, text, conf in ocr_output:
-                    ocr_results_combined.append(f"{text} (Confidence: {conf:.2f})")
-
-                # Draw bounding box
-                cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-        # Convert image to base64
-        _, buffer = cv2.imencode('.jpg', image)
-        img_base64 = base64.b64encode(buffer).decode()
-
-        return templates.TemplateResponse("results.html", {
-            "request": request,
-            "results": ocr_results_combined,
-            "image_data": img_base64
-        })
+        return jsonify(result_json)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
